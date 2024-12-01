@@ -1,0 +1,50 @@
+FROM rust:1.75-slim-bullseye as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    pkg-config \
+    libssl-dev \
+    libclang-dev \
+    clang \
+    protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create build directory
+WORKDIR /qdrant
+
+# Clone Qdrant source
+RUN git clone --depth 1 --branch v1.7.3 https://github.com/qdrant/qdrant.git .
+
+# Build Qdrant with optimizations for ARM but limit memory usage
+ENV RUSTFLAGS="-C target-cpu=native -C target-feature=+neon"
+ENV CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+ENV CARGO_PROFILE_RELEASE_LTO="thin"
+RUN cargo build --release
+
+# Create final image
+FROM debian:bullseye-slim
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libssl1.1 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the built binary from builder
+COPY --from=builder /qdrant/target/release/qdrant /usr/local/bin/
+
+# Create config directory
+RUN mkdir -p /qdrant/storage && mkdir -p /qdrant/config
+
+# Set the working directory
+WORKDIR /qdrant
+
+# Expose the default port
+EXPOSE 6333 6334
+
+# Set the entrypoint
+ENTRYPOINT ["qdrant"]
+
